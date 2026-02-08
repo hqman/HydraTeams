@@ -309,6 +309,7 @@ function translateEvent(
         }
       }
 
+      const inputTokens = event.response?.usage?.input_tokens || 0;
       const outputTokens = event.response?.usage?.output_tokens || 0;
 
       // Send message_delta
@@ -320,6 +321,7 @@ function translateEvent(
             stop_reason: stopReason,
           },
           usage: {
+            input_tokens: inputTokens,
             output_tokens: outputTokens,
           },
         },

@@ -209,7 +209,7 @@ export async function translateStream(
           sendSSE(response, "message_delta", {
             type: "message_delta",
             delta: { stop_reason: mapStopReason(choice.finish_reason) },
-            usage: { output_tokens: outputTokens },
+            usage: { input_tokens: 0, output_tokens: outputTokens },
           });
         }
       }

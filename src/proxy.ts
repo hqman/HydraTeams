@@ -4,12 +4,14 @@ import { translateRequest } from "./translators/request.js";
 import { translateStream } from "./translators/response.js";
 import { translateRequestToResponses } from "./translators/request-responses.js";
 import { translateResponsesStream } from "./translators/response-responses.js";
+import { ProxyLogger } from "./logger.js";
 
 const DEFAULT_OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const CHATGPT_API_URL = "https://chatgpt.com/backend-api/codex/responses";
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
 const LEAD_MARKER = "hydra:lead";
+const TEAMMATE_MARKER = "the user interacts primarily with the team lead";
 
 function shouldPassthrough(
   model: string,
@@ -19,7 +21,6 @@ function shouldPassthrough(
   if (passthroughModels.length === 0) return false;
   if (passthroughModels.includes("*")) return model.startsWith("claude-");
 
-  // "lead" mode: check for the hydra:lead marker in system prompt or messages
   if (passthroughModels.includes("lead")) {
     return !!searchText && searchText.includes(LEAD_MARKER);
   }
@@ -42,11 +43,9 @@ async function handlePassthrough(
   res: http.ServerResponse,
   url: string
 ): Promise<void> {
-  // Forward original auth headers from Claude Code — works with subscription auth
   const forwardHeaders: Record<string, string> = {
     "Content-Type": "application/json",
   };
-  // Relay all auth-related and anthropic headers
   const relayKeys = [
     "x-api-key", "authorization", "anthropic-version", "anthropic-beta",
     "cookie", "x-request-id",
@@ -88,11 +87,18 @@ async function handlePassthrough(
 }
 
 export function createProxyServer(config: ProxyConfig): http.Server {
-  return http.createServer(async (req, res) => {
-    // Strip query params for route matching
-    const pathname = (req.url || "").split("?")[0];
+  const logger = new ProxyLogger();
 
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  logger.banner({
+    targetModel: config.targetModel,
+    spoofModel: config.spoofModel,
+    port: config.port,
+    provider: config.targetProvider,
+    passthrough: config.passthroughModels,
+  });
+
+  return http.createServer(async (req, res) => {
+    const pathname = (req.url || "").split("?")[0];
 
     // Health check
     if (req.method === "GET" && (pathname === "/" || pathname === "/health")) {
@@ -111,11 +117,9 @@ export function createProxyServer(config: ProxyConfig): http.Server {
       const body = await readBody(req);
       try {
         const parsed = JSON.parse(body);
-        // If this model is passthrough, forward to real Anthropic with original auth
         if (parsed.model && shouldPassthrough(parsed.model, config.passthroughModels, parsed.system)) {
           return handlePassthrough(body, req.headers, res, req.url || "");
         }
-        // Otherwise return estimated count
         const estimatedTokens = JSON.stringify(parsed.messages || []).length / 4;
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ input_tokens: Math.ceil(estimatedTokens) }));
@@ -137,41 +141,55 @@ export function createProxyServer(config: ProxyConfig): http.Server {
       const body = await readBody(req);
       const anthropicReq = JSON.parse(body);
 
-      // Check system prompt AND messages for the lead marker
+      // Extract system text for routing decisions
       let systemText = "";
       if (typeof anthropicReq.system === "string") {
         systemText = anthropicReq.system;
       } else if (Array.isArray(anthropicReq.system)) {
         systemText = anthropicReq.system.map((b: { text?: string }) => b.text || "").join(" ");
       }
-      // Also check first few messages — CLAUDE.md might be injected as a user/system message
+
       const msgText = (anthropicReq.messages || []).slice(0, 3).map((m: { content?: string | Array<{ text?: string }> }) => {
         if (typeof m.content === "string") return m.content;
         if (Array.isArray(m.content)) return m.content.map((b: { text?: string }) => b.text || "").join(" ");
         return "";
       }).join(" ");
+
       const fullText = systemText + " " + msgText;
       const hasMarker = fullText.includes(LEAD_MARKER);
+      const isTeammate = systemText.toLowerCase().includes(TEAMMATE_MARKER);
+      const isStreaming = anthropicReq.stream !== false;
+      const msgCount = anthropicReq.messages?.length || 0;
+      const toolCount = anthropicReq.tools?.length || 0;
 
-      // Debug: show what we're checking
-      console.log(`[PROXY] Model: ${anthropicReq.model} | Messages: ${anthropicReq.messages?.length || 0} | Tools: ${anthropicReq.tools?.length || 0} | Stream: ${anthropicReq.stream}`);
-      console.log(`[PROXY] System type: ${typeof anthropicReq.system} | System length: ${systemText.length} | Marker: ${hasMarker}`);
-      if (!hasMarker && systemText.length > 0) {
-        console.log(`[PROXY] System preview: ${systemText.slice(0, 200)}...`);
-      }
+      // Routing: teammates always translate, lead passthrough if configured
+      const isPassthrough = !isTeammate && shouldPassthrough(anthropicReq.model, config.passthroughModels, fullText);
 
-      // Passthrough: lead session goes to real Anthropic API
-      if (shouldPassthrough(anthropicReq.model, config.passthroughModels, fullText)) {
-        console.log(`[PROXY] Passthrough → Anthropic API (${anthropicReq.model})`);
+      // Identify agent session
+      const session = logger.identify({ toolCount, msgCount, isTeammate, systemText });
+
+      // Log the request
+      logger.logRequest(session, {
+        model: anthropicReq.model,
+        msgCount,
+        toolCount,
+        isStreaming,
+        isTeammate,
+        hasMarker,
+        systemLength: systemText.length,
+        route: isPassthrough ? "passthrough" : "translate",
+        targetModel: isPassthrough ? undefined : config.targetModel,
+      });
+
+      // ─── Passthrough to real Anthropic ───
+      if (isPassthrough) {
         return handlePassthrough(body, req.headers, res, req.url || "");
       }
 
-      // ─── Route to appropriate provider ───
-      const isStreaming = anthropicReq.stream !== false;
+      // ─── Route to target provider ───
 
       if (config.targetProvider === "chatgpt") {
         // ─── ChatGPT Backend (Responses API) ───
-        console.log(`[PROXY] Translating → ${config.targetModel} via ChatGPT subscription`);
         const responsesReq = translateRequestToResponses(anthropicReq, config.targetModel);
 
         const MAX_RETRIES = 5;
@@ -191,7 +209,7 @@ export function createProxyServer(config: ProxyConfig): http.Server {
           if (upstream.status !== 429) break;
           if (attempt < MAX_RETRIES) {
             const waitMs = Math.min(1000 * Math.pow(2, attempt), 10000);
-            console.log(`[PROXY] Rate limited (429), retry ${attempt + 1}/${MAX_RETRIES} in ${waitMs}ms...`);
+            logger.logFile(session, `Rate limited (429), retry ${attempt + 1}/${MAX_RETRIES} in ${waitMs}ms`);
             await new Promise(r => setTimeout(r, waitMs));
           }
         }
@@ -199,13 +217,14 @@ export function createProxyServer(config: ProxyConfig): http.Server {
         if (!upstream || !upstream.ok) {
           const errText = upstream ? await upstream.text() : "No response";
           const status = upstream?.status || 500;
-          console.error(`[PROXY] ChatGPT error ${status}: ${errText.slice(0, 500)}`);
+          logger.logError(session, `ChatGPT ${status}: ${errText.slice(0, 300)}`);
           res.writeHead(status, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: errText } }));
           return;
         }
 
         if (!upstream.body) {
+          logger.logError(session, "No response body from ChatGPT");
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "No response body" } }));
           return;
@@ -217,7 +236,6 @@ export function createProxyServer(config: ProxyConfig): http.Server {
       } else {
         // ─── OpenAI Chat Completions ───
         const openaiUrl = config.targetUrl || DEFAULT_OPENAI_URL;
-        console.log(`[PROXY] Translating → ${config.targetModel} via ${config.targetUrl ? config.targetUrl : "OpenAI"} (stream: ${isStreaming})`);
         const openaiReq = translateRequest(anthropicReq, config.targetModel);
 
         if (!isStreaming) {
@@ -239,7 +257,7 @@ export function createProxyServer(config: ProxyConfig): http.Server {
           if (upstream.status !== 429) break;
           if (attempt < MAX_RETRIES) {
             const waitMs = Math.min(1000 * Math.pow(2, attempt), 10000);
-            console.log(`[PROXY] Rate limited (429), retry ${attempt + 1}/${MAX_RETRIES} in ${waitMs}ms...`);
+            logger.logFile(session, `Rate limited (429), retry ${attempt + 1}/${MAX_RETRIES} in ${waitMs}ms`);
             await new Promise(r => setTimeout(r, waitMs));
           }
         }
@@ -247,7 +265,7 @@ export function createProxyServer(config: ProxyConfig): http.Server {
         if (!upstream || !upstream.ok) {
           const errText = upstream ? await upstream.text() : "No response";
           const status = upstream?.status || 500;
-          console.error(`[PROXY] OpenAI error ${status}: ${errText.slice(0, 500)}`);
+          logger.logError(session, `OpenAI ${status}: ${errText.slice(0, 300)}`);
           const errorType = status === 429 ? "rate_limit_error" : status === 401 ? "authentication_error" : status >= 500 ? "api_error" : "invalid_request_error";
           res.writeHead(status, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ type: "error", error: { type: errorType, message: errText } }));
@@ -274,6 +292,7 @@ export function createProxyServer(config: ProxyConfig): http.Server {
         }
 
         if (!upstream.body) {
+          logger.logError(session, "No response body from OpenAI");
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ type: "error", error: { type: "api_error", message: "No response body" } }));
           return;
