@@ -38,6 +38,7 @@ export function loadConfig(args: string[]): ProxyConfig {
   const targetModel = getArg("--model") || process.env.HYDRA_TARGET_MODEL || "";
   const targetProvider = (getArg("--provider") || process.env.HYDRA_TARGET_PROVIDER || "openai") as ProxyConfig["targetProvider"];
   const spoofModel = getArg("--spoof") || process.env.HYDRA_SPOOF_MODEL || "claude-sonnet-4-5-20250929";
+  const targetUrl = getArg("--target-url") || process.env.HYDRA_TARGET_URL;
 
   // Passthrough config
   const passthroughArg = getArg("--passthrough");
@@ -72,9 +73,9 @@ export function loadConfig(args: string[]): ProxyConfig {
       const codexAuth = loadCodexAuth();
       openaiApiKey = codexAuth?.accessToken || "";
     }
-    if (!openaiApiKey) {
+    if (!openaiApiKey && !targetUrl) {
       console.error("Error: No OpenAI API key found.");
-      console.error("  Set OPENAI_API_KEY env var, or login with: codex --login");
+      console.error("  Set OPENAI_API_KEY env var, login with: codex --login, or use --target-url for local servers");
       process.exit(1);
     }
   }
@@ -88,5 +89,5 @@ export function loadConfig(args: string[]): ProxyConfig {
     console.log("Passthrough enabled — Claude Code auth headers will be relayed to Anthropic API.");
   }
 
-  return { port, targetModel, targetProvider, openaiApiKey, spoofModel, passthroughModels, anthropicApiKey, chatgptAccessToken, chatgptAccountId };
+  return { port, targetModel, targetProvider, targetUrl, openaiApiKey, spoofModel, passthroughModels, anthropicApiKey, chatgptAccessToken, chatgptAccountId };
 }

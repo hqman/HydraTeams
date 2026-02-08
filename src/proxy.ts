@@ -5,7 +5,7 @@ import { translateStream } from "./translators/response.js";
 import { translateRequestToResponses } from "./translators/request-responses.js";
 import { translateResponsesStream } from "./translators/response-responses.js";
 
-const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
+const DEFAULT_OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const CHATGPT_API_URL = "https://chatgpt.com/backend-api/codex/responses";
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
@@ -216,7 +216,8 @@ export function createProxyServer(config: ProxyConfig): http.Server {
 
       } else {
         // ─── OpenAI Chat Completions ───
-        console.log(`[PROXY] Translating → ${config.targetModel} via OpenAI (stream: ${isStreaming})`);
+        const openaiUrl = config.targetUrl || DEFAULT_OPENAI_URL;
+        console.log(`[PROXY] Translating → ${config.targetModel} via ${config.targetUrl ? config.targetUrl : "OpenAI"} (stream: ${isStreaming})`);
         const openaiReq = translateRequest(anthropicReq, config.targetModel);
 
         if (!isStreaming) {
@@ -227,12 +228,11 @@ export function createProxyServer(config: ProxyConfig): http.Server {
         const MAX_RETRIES = 5;
         let upstream: Response | null = null;
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-          upstream = await fetch(OPENAI_API_URL, {
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          if (config.openaiApiKey) headers["Authorization"] = `Bearer ${config.openaiApiKey}`;
+          upstream = await fetch(openaiUrl, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${config.openaiApiKey}`,
-            },
+            headers,
             body: JSON.stringify(openaiReq),
           });
 

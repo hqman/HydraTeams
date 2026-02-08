@@ -165,6 +165,7 @@ export interface ProxyConfig {
   port: number;
   targetModel: string;
   targetProvider: "openai" | "chatgpt" | "google" | "ollama";
+  targetUrl?: string;
   openaiApiKey: string;
   spoofModel: string;
   passthroughModels: string[];
