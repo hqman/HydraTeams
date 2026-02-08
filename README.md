@@ -2,7 +2,7 @@
 
 > **The model doesn't matter. The orchestration does.**
 
-A translation proxy that lets Claude Code Agent Teams use any AI model as a teammate. GPT Codex, Gemini, Ollama — they all become full Claude Code agents with 15+ tools, file access, bash, git, and autonomous task execution.
+A translation proxy that lets Claude Code Agent Teams use any AI model as a teammate. GPT Codex, Gemini, Ollama: they all become full Claude Code agents with 15+ tools, file access, bash, git, and autonomous task execution.
 
 One proxy. One env var. Any model.
 
