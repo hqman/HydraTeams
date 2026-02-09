@@ -110,9 +110,11 @@ function formatPassthroughTarget(baseUrl: string): string {
   try {
     const parsed = new URL(baseUrl);
     const host = parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
-    return `Anthropic@${host}`;
+    const isOfficial = parsed.hostname.toLowerCase() === "api.anthropic.com";
+    const kind = isOfficial ? "OFFICIAL" : "CUSTOM";
+    return `Anthropic[${kind}]@${host}`;
   } catch {
-    return `Anthropic@${baseUrl}`;
+    return `Anthropic[CUSTOM]@${baseUrl}`;
   }
 }
 
