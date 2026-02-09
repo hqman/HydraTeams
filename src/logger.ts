@@ -36,6 +36,7 @@ export interface RequestInfo {
   systemLength: number;
   route: "passthrough" | "translate" | "count_tokens";
   targetModel?: string;
+  passthroughTarget?: string;
 }
 
 export class ProxyLogger {
@@ -112,9 +113,10 @@ export class ProxyLogger {
     this.totalRequests++;
     const ts = this.ts();
     const num = String(session.requestCount).padStart(3);
+    const modelLabel = info.route === "passthrough" ? `model=${info.model}, ` : "";
 
     const route = info.route === "passthrough"
-      ? "Anthropic"
+      ? (info.passthroughTarget || "Anthropic")
       : info.targetModel || "GPT";
 
     // Console: one compact line
@@ -122,7 +124,7 @@ export class ProxyLogger {
       `${session.color}[${this.pad(session.label, 10)}]${C.reset} ` +
       `${C.dim}${ts}${C.reset} ` +
       `→ ${route} ` +
-      `${C.dim}(${info.msgCount} msgs, ${info.toolCount} tools, #${num})${C.reset}`
+      `${C.dim}(${modelLabel}${info.msgCount} msgs, ${info.toolCount} tools, #${num})${C.reset}`
     );
 
     // File: detailed

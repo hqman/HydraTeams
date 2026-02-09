@@ -39,6 +39,7 @@ export function loadConfig(args: string[]): ProxyConfig {
   const targetProvider = (getArg("--provider") || process.env.HYDRA_TARGET_PROVIDER || "openai") as ProxyConfig["targetProvider"];
   const spoofModel = getArg("--spoof") || process.env.HYDRA_SPOOF_MODEL || "claude-sonnet-4-5-20250929";
   const targetUrl = getArg("--target-url") || process.env.HYDRA_TARGET_URL;
+  const leadBaseUrl = getArg("--lead-base-url") || process.env.HYDRA_LEAD_BASE_URL;
 
   // Passthrough config
   const passthroughArg = getArg("--passthrough");
@@ -85,9 +86,34 @@ export function loadConfig(args: string[]): ProxyConfig {
     process.exit(1);
   }
 
-  if (passthroughModels.length > 0) {
-    console.log("Passthrough enabled — Claude Code auth headers will be relayed to Anthropic API.");
+  if (leadBaseUrl) {
+    try {
+      // Validate early so passthrough failures are not deferred to runtime.
+      new URL(leadBaseUrl);
+    } catch {
+      console.error(`Error: Invalid --lead-base-url value: ${leadBaseUrl}`);
+      process.exit(1);
+    }
   }
 
-  return { port, targetModel, targetProvider, targetUrl, openaiApiKey, spoofModel, passthroughModels, anthropicApiKey, chatgptAccessToken, chatgptAccountId };
+  if (passthroughModels.length > 0) {
+    const target = leadBaseUrl
+      ? `Lead passthrough target: ${leadBaseUrl}`
+      : "Lead passthrough target: https://api.anthropic.com";
+    console.log(`Passthrough enabled — Claude Code auth headers will be relayed. ${target}`);
+  }
+
+  return {
+    port,
+    targetModel,
+    targetProvider,
+    targetUrl,
+    leadBaseUrl,
+    openaiApiKey,
+    spoofModel,
+    passthroughModels,
+    anthropicApiKey,
+    chatgptAccessToken,
+    chatgptAccountId,
+  };
 }

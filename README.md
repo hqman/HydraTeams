@@ -97,6 +97,19 @@ export OPENAI_API_KEY=sk-...
 node dist/index.js --model gpt-4o-mini --provider openai --port 3456 --passthrough lead
 ```
 
+### Option C: Lead passthrough to custom Anthropic-compatible upstream
+
+```bash
+node dist/index.js \
+  --model gpt-5.3-codex \
+  --provider chatgpt \
+  --port 3456 \
+  --passthrough lead \
+  --lead-base-url http://127.0.0.1:8317
+```
+
+When `--lead-base-url` is set, lead passthrough requests go to that upstream instead of `https://api.anthropic.com`.
+
 ### Using with Claude Code
 
 Add `<!-- hydra:lead -->` to your project's `CLAUDE.md` (this tells the proxy which requests are from the lead agent and should passthrough to real Claude).
@@ -127,6 +140,7 @@ No API keys needed for the lead — the proxy relays your Claude subscription au
 | `--port` | `HYDRA_PROXY_PORT` | `3456` | Proxy listen port |
 | `--spoof` | `HYDRA_SPOOF_MODEL` | `claude-sonnet-4-5-20250929` | Model name reported to Claude Code |
 | `--passthrough` | `HYDRA_PASSTHROUGH` | (none) | Passthrough mode: `lead`, `*`, or comma-separated model names |
+| `--lead-base-url` | `HYDRA_LEAD_BASE_URL` | `https://api.anthropic.com` | Anthropic-compatible base URL for lead passthrough |
 
 ## Supported Providers
 
